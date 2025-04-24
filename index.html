@@ -132,13 +132,13 @@
     
     <div id="win-screen">
         <h1>CONGRATULATIONS!</h1>
-        <p>You reached the top of the stairway at 69 km!</p>
+        <p>You reached the top of the stairway at 6.9 km!</p>
         <button id="restart-button-win" class="restart-button">Play Again</button>
     </div>
 
     <div id="instructions">
         <h2>Stairway to Heaven</h2>
-        <p>Climb the stairs to reach 69 km height</p>
+        <p>Climb the stairs to reach 6.9 km height</p>
         <p>Controls: W/A/S/D to move, Mouse to look around, Space to jump</p>
         <p>Be careful not to fall!</p>
         <button id="start-button">Start Game</button>
@@ -189,7 +189,7 @@
         // Game state
         let playerHeight = 0;
         const failHeight = -100;
-        const winHeight = 690; 
+        const winHeight = 6900; 
         // Stair rendering constants
         const stairRenderDistance = 300; 
         const stairRemoveDistance = 100; 
@@ -486,16 +486,22 @@
         }
 
         function calculateGapProbability(height) {
-            if (height < 10) return 0.01;  // Very rare gaps at the start (1% chance)
+            if (height < 100) return 0.01;  // Slightly higher initial probability (1% chance)
 
-            // Gradual increase in gap probability
-            const baseProb = 0.01;  // Start very low
-            const maxProb = 0.4;    // Maximum probability
-    
+            // More sophisticated probability curve
+            const baseProb = 0.01;  // Start slightly higher
+            const maxProb = 0.6;    // Maximum probability remains the same
+
+            // More gradual, slower increase in gap probability
             const probIncrease = Math.min(
                 maxProb, 
-                baseProb + Math.pow(height / 100, 2) * 0.1  // Slower, more gradual increase
+                baseProb + Math.pow(height / 1000, 2) * 0.1  // Quadratic increase for slower progression
             );
+
+            // Extreme difficulty in last 10% (690m - 690m)
+            if (height >= 6200) {
+                return Math.min(0.8, probIncrease * 2);  // Very high probability of gaps in last 10%
+            }
 
             return probIncrease;
         }
