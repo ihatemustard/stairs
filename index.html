@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stairway to Heaven</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Arial', sans-serif;
+            color: white;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        #info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 20px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 10px;
+            pointer-events: none;
+        }
+
+        #game-over, #win-screen, #instructions {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 100;
+        }
+
+        #game-over h1, #win-screen h1, #instructions h2 {
+            text-align: center;
+            width: 100%;
+            margin-bottom: 20px;
+        }
+
+        #game-over p, #win-screen p, #instructions p {
+            text-align: center;
+            max-width: 80%;
+        }
+
+        #start-button {
+            margin-top: 30px;
+            padding: 15px 30px;
+            font-size: 24px;
+            background-color: #44ff44;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            box-shadow: 0 0 20px rgba(68, 255, 68, 0.7);
+            transition: all 0.3s ease;
+        }
+
+        #start-button:hover {
+            background-color: #66ff66;
+            transform: scale(1.05);
+        }
+
+        #restart-button, #restart-button-win {
+            margin-top: 30px;
+            padding: 15px 30px;
+            font-size: 24px;
+            background-color: #ff4444;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            box-shadow: 0 0 20px rgba(255, 68, 68, 0.7);
+            transition: all 0.3s ease;
+        }
+
+        #restart-button:hover, #restart-button-win:hover {
+            background-color: #ff6666;
+            transform: scale(1.05);
+        }
+
+        #restart-button-win {
+            background-color: #ffd700;
+            box-shadow: 0 0 20px rgba(255, 215, 0, 0.7);
+        }
+
+        #restart-button-win:hover {
+            background-color: #ffdf33;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">Height: <span id="height">0</span> m</div>
+    
+    <div id="game-over">
+        <h1>GAME OVER</h1>
+        <button id="restart-button">Try Again</button>
+    </div>
+    
+    <div id="win-screen">
+        <h1>CONGRATULATIONS!</h1>
+        <p>You reached the top of the stairway at 69 km!</p>
+        <button id="restart-button-win" class="restart-button">Play Again</button>
+    </div>
+
+    <div id="instructions">
+        <h2>Stairway to Heaven</h2>
+        <p>Climb the stairs to reach 69 km height</p>
+        <p>Controls: W/A/S/D to move, Mouse to look around, Space to jump</p>
+        <p>Be careful not to fall!</p>
+        <button id="start-button">Start Game</button>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.0/dist/confetti.browser.min.js"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+
+        // Game variables
+        let camera, scene, renderer, controls;
+        let moveForward = false;
+        let moveBackward = false;
+        let moveLeft = false;
+        let moveRight = false;
+        let canJump = false;
+        let raycaster;
+        let velocity = new THREE.Vector3();
+        let direction = new THREE.Vector3();
+        let prevTime = performance.now();
+        let stairs = [];
+        let gameOver = false;
+        let gameWon = false;
+        let brickTexture;
+        let stairWidth, stairHeight, stairDepth;
+        let visibleStairs = []; // Track currently visible stairs
+        let lastStairIndex = 0; // Last loaded stair index
+
+        // Physics constants
+        const gravity = 15; 
+        const jumpStrength = 8; 
+        const movementSpeed = 6; 
+        const airControl = 0.8; 
+        
+        // Game state
+        let playerHeight = 0;
+        const failHeight = -100;
+        const winHeight = 690; 
+        // Stair rendering constants
+        const stairRenderDistance = 300; 
+        const stairRemoveDistance = 100; 
+
+        init();
+        animate();
+
+        function init() {
+            // Initially show instructions
+            document.getElementById('instructions').style.display = 'flex';
+
+            // Set up camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 3000);
+            camera.position.y = 10;
+
+            // Set up scene
+            scene = new THREE.Scene();
+            // Remove the sky blue background
+            scene.background = null; 
+            
+            // Remove the fog
+            scene.fog = null;
+
+            // Add lights
+            const ambientLight = new THREE.AmbientLight(0x404040, 2);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 2);
+            directionalLight.position.set(1, 1, 1).normalize();
+            scene.add(directionalLight);
+
+            // Load brick texture with error handling
+            const textureLoader = new THREE.TextureLoader();
+            
+            // Create and apply a basic default texture in case loading fails
+            const defaultTexture = createDefaultBrickTexture();
+            brickTexture = defaultTexture;
+            
+            // Try to load the external texture
+            textureLoader.load(
+                'https://s1.qwant.com/thumbr/474x704/9/0/2b3e233b06550b2ad09b1584a270e323e88d9a0b9abec2a5c646c46e00e3f6/th.jpg?u=https%3A%2F%2Ftse.mm.bing.net%2Fth%3Fid%3DOIP.iK1PuUZiFCB0tMc7ZlH2NQHaLA%26pid%3DApi&q=0&b=1&p=0&a=0',
+                function(texture) {
+                    // Successfully loaded external texture
+                    brickTexture = texture;
+                    brickTexture.wrapS = THREE.RepeatWrapping;
+                    brickTexture.wrapT = THREE.RepeatWrapping;
+                    
+                    // Update materials of existing stairs
+                    updateStairMaterials();
+                },
+                undefined,
+                function(err) {
+                    console.error('An error occurred loading the texture:', err);
+                    // Keep using the default texture
+                }
+            );
+            
+            // Set stair properties
+            stairWidth = 5;
+            stairHeight = 0.5;
+            stairDepth = 2;
+            
+            // Initial stairs setup - only create the first batch
+            setupInitialStairs();
+            
+            // Set up renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            // Set up first-person controls
+            controls = new PointerLockControls(camera, document.body);
+            
+            // Lock/unlock mouse pointer on click
+            document.getElementById('start-button').addEventListener('click', function() {
+                controls.lock();
+                document.getElementById('instructions').style.display = 'none';
+            });
+
+            controls.addEventListener('lock', function() {
+                document.getElementById('instructions').style.display = 'none';
+            });
+
+            controls.addEventListener('unlock', function() {
+                if (!gameOver && !gameWon) {
+                    gameOver = true;
+                    document.getElementById('game-over').style.display = 'flex';
+                    
+                    // Remove the subtitle paragraph
+                    const gameOverP = document.querySelector('#game-over p');
+                    if (gameOverP) {
+                        gameOverP.remove();
+                    }
+                }
+            });
+
+            // Set up keyboard controls
+            const onKeyDown = function(event) {
+                if (gameOver || gameWon) return;
+                
+                switch (event.code) {
+                    case 'ArrowUp':
+                    case 'KeyW':
+                        moveForward = true;
+                        break;
+                    case 'ArrowLeft':
+                    case 'KeyA':
+                        moveLeft = true;
+                        break;
+                    case 'ArrowDown':
+                    case 'KeyS':
+                        moveBackward = true;
+                        break;
+                    case 'ArrowRight':
+                    case 'KeyD':
+                        moveRight = true;
+                        break;
+                    case 'Space':
+                        if (canJump) {
+                            velocity.y = jumpStrength;
+                        }
+                        canJump = false;
+                        break;
+                }
+            };
+
+            const onKeyUp = function(event) {
+                switch (event.code) {
+                    case 'ArrowUp':
+                    case 'KeyW':
+                        moveForward = false;
+                        break;
+                    case 'ArrowLeft':
+                    case 'KeyA':
+                        moveLeft = false;
+                        break;
+                    case 'ArrowDown':
+                    case 'KeyS':
+                        moveBackward = false;
+                        break;
+                    case 'ArrowRight':
+                    case 'KeyD':
+                        moveRight = false;
+                        break;
+                }
+            };
+
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+
+            // Override default ESC key behavior to prevent showing instructions
+            document.addEventListener('keydown', function(event) {
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    
+                    // If controls are unlocked and game is in progress, trigger game over
+                    if (!gameOver && !gameWon && !controls.isLocked) {
+                        gameOver = true;
+                        document.getElementById('game-over').style.display = 'flex';
+                        
+                        // Remove the subtitle paragraph
+                        const gameOverP = document.querySelector('#game-over p');
+                        if (gameOverP) {
+                            gameOverP.remove();
+                        }
+                    }
+                }
+            });
+
+            // Set up raycaster for ground detection
+            raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0), 0, 10);
+
+            // Set up restart button
+            document.getElementById('restart-button').addEventListener('click', restartGame);
+            document.getElementById('restart-button-win').addEventListener('click', restartGame);
+
+            // Handle window resize
+            window.addEventListener('resize', onWindowResize);
+            
+            // Set initial player position directly on staircase
+            camera.position.set(0, 5, 0);
+
+            // Add visibility change event listener to handle tabbing out
+            document.addEventListener('visibilitychange', function() {
+                if (document.hidden && !gameOver && !gameWon) {
+                    gameOver = true;
+                    document.getElementById('game-over').style.display = 'flex';
+                    controls.unlock();
+                }
+            });
+        }
+
+        function createDefaultBrickTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            
+            // Base brick color
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(0, 0, 256, 256);
+            
+            // Add noise texture for roughness
+            for (let i = 0; i < 10000; i++) {
+                ctx.fillStyle = `rgba(0,0,0,${Math.random() * 0.1})`;
+                ctx.fillRect(
+                    Math.random() * 256,
+                    Math.random() * 256,
+                    1,
+                    1
+                );
+            }
+            
+            // Brick pattern with variations
+            for(let y = 0; y < 256; y += 64) {
+                let offset = (y % 128 === 0) ? 0 : 64;
+                for(let x = offset; x < 256; x += 128) {
+                    // Random brick color variation
+                    const hue = Math.random() * 20 - 10;
+                    const sat = Math.random() * 20 - 10;
+                    const light = Math.random() * 20 - 10;
+                    ctx.fillStyle = `hsl(20, ${60 + sat}%, ${30 + light}%)`;
+                    
+                    // Slightly irregular brick shapes
+                    ctx.beginPath();
+                    ctx.moveTo(x + Math.random() * 4 - 2, y + Math.random() * 4 - 2);
+                    ctx.lineTo(x + 60 + Math.random() * 4 - 2, y + Math.random() * 4 - 2);
+                    ctx.lineTo(x + 60 + Math.random() * 4 - 2, y + 60 + Math.random() * 4 - 2);
+                    ctx.lineTo(x + Math.random() * 4 - 2, y + 60 + Math.random() * 4 - 2);
+                    ctx.fill();
+                }
+            }
+            
+            // Add mortar texture
+            ctx.strokeStyle = '#888888';
+            ctx.lineWidth = 4;
+            for(let y = 0; y <= 256; y += 64) {
+                for(let x = 0; x < 256; x += 4) {
+                    ctx.fillStyle = `rgba(169,169,169,${Math.random() * 0.4 + 0.6})`;
+                    ctx.fillRect(x, y - 2, 4, 4);
+                }
+            }
+            for(let x = 0; x <= 256; x += 64) {
+                for(let y = 0; y < 256; y += 4) {
+                    ctx.fillStyle = `rgba(169,169,169,${Math.random() * 0.4 + 0.6})`;
+                    ctx.fillRect(x - 2, y, 4, 4);
+                }
+            }
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(2, 2); 
+            return texture;
+        }
+
+        function updateStairMaterials() {
+            const stairMaterial = new THREE.MeshStandardMaterial({ 
+                map: brickTexture,
+                roughness: 0.9,
+                metalness: 0.1,
+                bumpMap: brickTexture,
+                bumpScale: 0.1,
+                normalScale: new THREE.Vector2(0.5, 0.5)
+            });
+            
+            for(const stair of visibleStairs) {
+                stair.material = stairMaterial;
+            }
+        }
+
+        function calculateGapProbability(height) {
+            if (height < 10) return 0.01;  // Very rare gaps at the start (1% chance)
+
+            // Gradual increase in gap probability
+            const baseProb = 0.01;  // Start very low
+            const maxProb = 0.4;    // Maximum probability
+    
+            const probIncrease = Math.min(
+                maxProb, 
+                baseProb + Math.pow(height / 100, 2) * 0.1  // Slower, more gradual increase
+            );
+
+            return probIncrease;
+        }
+        
+        function createStair(index) {
+            // Track consecutive missing stairs
+            const visibleStairsInScene = stairs.filter(s => s && s.userData.index >= index - 2);
+            const consecutiveMissingStairs = visibleStairsInScene.filter(s => s === null).length;
+
+            // Prevent more than two consecutive missing stairs
+            if (consecutiveMissingStairs >= 2) {
+                const stairGeometry = new THREE.BoxGeometry(stairWidth, stairHeight, stairDepth);
+                const stairMaterial = new THREE.MeshStandardMaterial({ 
+                    map: brickTexture,
+                    roughness: 0.7,
+                    metalness: 0.2
+                });
+                
+                const stair = new THREE.Mesh(stairGeometry, stairMaterial);
+                
+                stair.position.y = index * stairHeight;
+                stair.position.z = -index * stairDepth;
+                stair.userData.index = index; 
+                
+                scene.add(stair);
+                stairs.push(stair);
+                visibleStairs.push(stair);
+                return stair;
+            }
+
+            const gapProbability = calculateGapProbability(index * stairHeight);
+            
+            if (Math.random() < gapProbability) {
+                stairs.push(null);
+                return null;
+            }
+
+            const stairGeometry = new THREE.BoxGeometry(stairWidth, stairHeight, stairDepth);
+            const stairMaterial = new THREE.MeshStandardMaterial({ 
+                map: brickTexture,
+                roughness: 0.7,
+                metalness: 0.2
+            });
+            
+            const stair = new THREE.Mesh(stairGeometry, stairMaterial);
+            
+            stair.position.y = index * stairHeight;
+            stair.position.z = -index * stairDepth;
+            stair.userData.index = index; 
+            
+            scene.add(stair);
+            stairs.push(stair);
+            visibleStairs.push(stair);
+            return stair;
+        }
+
+        function setupInitialStairs() {
+            for (let i = 0; i < 100; i++) {
+                const stair = createStair(i);
+                if (stair === null && i > 0) {
+                    createStair(i-1);
+                }
+            }
+            lastStairIndex = 99;
+        }
+
+        function updateVisibleStairs() {
+            const playerPosition = controls.getObject().position;
+            const playerStairIndex = Math.floor(playerPosition.y / stairHeight);
+            
+            while (lastStairIndex < playerStairIndex + stairRenderDistance && lastStairIndex < winHeight / stairHeight) {
+                lastStairIndex++;
+                const stair = createStair(lastStairIndex);
+                
+                if (stair === null && lastStairIndex > 0) {
+                    createStair(lastStairIndex-1);
+                }
+            }
+            
+            for (let i = visibleStairs.length - 1; i >= 0; i--) {
+                const stair = visibleStairs[i];
+                if (stair.userData.index < playerStairIndex - stairRemoveDistance) {
+                    scene.remove(stair);
+                    visibleStairs.splice(i, 1);
+                }
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            if (gameOver || gameWon) return;
+
+            const time = performance.now();
+            const delta = (time - prevTime) / 1000;
+
+            velocity.y -= gravity * delta;
+
+            direction.z = Number(moveForward) - Number(moveBackward);
+            direction.x = Number(moveRight) - Number(moveLeft);
+            direction.normalize();
+
+            const currentSpeed = canJump ? movementSpeed : movementSpeed * airControl;
+
+            if (moveForward || moveBackward) {
+                const forwardMovement = direction.z * currentSpeed * delta;
+                controls.moveForward(forwardMovement);
+            }
+            if (moveLeft || moveRight) {
+                const sideMovement = direction.x * currentSpeed * delta;
+                controls.moveRight(sideMovement);
+            }
+
+            controls.getObject().position.y += velocity.y * delta;
+
+            raycaster.ray.origin.copy(controls.getObject().position);
+            const intersections = raycaster.intersectObjects(stairs.filter(s => s !== null), false);
+            const onObject = intersections.length > 0;
+
+            if (onObject) {
+                const closestIntersection = intersections[0];
+                const distanceToGround = closestIntersection.distance;
+
+                if (distanceToGround <= 2 && velocity.y < 0) {
+                    if (Math.abs(velocity.y) > 5) {
+                        velocity.y *= -0.2; 
+                    } else {
+                        velocity.y = 0;
+                    }
+                    
+                    controls.getObject().position.y = closestIntersection.point.y + 2;
+                    canJump = true;
+                }
+            } else {
+                canJump = false;
+            }
+
+            updateVisibleStairs();
+
+            playerHeight = controls.getObject().position.y;
+            document.getElementById('height').textContent = Math.floor(playerHeight);
+
+            if (playerHeight < failHeight && !gameOver) {
+                gameOver = true;
+                document.getElementById('game-over').style.display = 'flex';
+                controls.unlock();
+            }
+
+            if (playerHeight >= winHeight && !gameWon) {
+                gameWon = true;
+                document.getElementById('win-screen').style.display = 'flex';
+                controls.unlock();
+                
+                function shootConfetti() {
+                    confetti({
+                        particleCount: 100,
+                        spread: 70,
+                        origin: { y: 0.6 },
+                        colors: ['#ff0a54', '#ff477e', '#ff7096', '#ff85a2', '#fbb1bd', '#f9bec7']
+                    });
+                }
+                
+                for (let i = 0; i < 5; i++) {
+                    setTimeout(shootConfetti, i * 500);
+                }
+            }
+
+            prevTime = time;
+            renderer.render(scene, camera);
+        }
+
+        function restartGame() {
+            window.location.reload();
+        }
+    </script>
+</body>
+</html>
