@@ -120,10 +120,23 @@
             background-color: #4CAF50;
             transition: width 0.3s ease;
         }
+
+        #debug-info {
+            position: absolute; 
+            top: 10px; 
+            right: 10px;  
+            color: white; 
+            background-color: rgba(0,0,0,0.5); 
+            padding: 10px;  
+            display: none;
+            z-index: 1000;
+            text-align: right;  
+        }
     </style>
 </head>
 <body>
     <div id="info">Height: <span id="height">0</span> m</div>
+    <div id="debug-info">Height: <span id="debug-height">0</span> m<br> FPS: <span id="debug-fps">0</span></div>
     
     <div id="game-over">
         <h1>GAME OVER</h1>
@@ -139,7 +152,7 @@
     <div id="instructions">
         <h2>Stairway to Heaven</h2>
         <p>Climb the stairs to reach 6.9 km height</p>
-        <p>Controls: W/A/S/D to move, Mouse to look around, Space to jump, Shift to sprint</p>
+        <p>Controls: W/A/S/D to move, Mouse to look around, Space to jump</p>
         <p>Be careful not to fall!</p>
         <button id="start-button">Start Game</button>
     </div>
@@ -202,8 +215,18 @@
         const jumpStaminaCost = 60;     
         const staminaRegenRate = 40;    
 
-        init();
-        animate();
+        // Debug variables
+        let debugMode = false;
+        let fpsFrames = 0;
+        let fpsLastTime = performance.now();
+        let f2PressCount = 0;
+        let lastF2PressTime = 0;
+        let lastPlayerPosition = new THREE.Vector3();
+
+        // FPS Limiter
+        const targetFPS = 350;
+        const fpsInterval = 1000 / targetFPS;
+        let then = performance.now();
 
         function init() {
             // Initially show instructions
@@ -299,6 +322,13 @@
             const onKeyDown = function(event) {
                 if (gameOver || gameWon) return;
                 
+                // F8 debug toggle
+                if (event.code === 'F8') {
+                    event.preventDefault();
+                    debugMode = !debugMode;
+                    document.getElementById('debug-info').style.display = debugMode ? 'block' : 'none';
+                }
+
                 switch (event.code) {
                     case 'ArrowUp':
                     case 'KeyW':
@@ -379,6 +409,56 @@
                         if (gameOverP) {
                             gameOverP.remove();
                         }
+                    }
+                }
+            });
+
+            // F2 reload handler
+            document.addEventListener('keydown', function(event) {
+                if (event.code === 'F2') {
+                    event.preventDefault();
+                    
+                    const currentTime = performance.now();
+                    
+                    // Check if F2 is pressed multiple times without moving
+                    const playerMoved = Math.abs(controls.getObject().position.x - lastPlayerPosition.x) > 0.1 ||
+                                        Math.abs(controls.getObject().position.y - lastPlayerPosition.y) > 0.1 ||
+                                        Math.abs(controls.getObject().position.z - lastPlayerPosition.z) > 0.1;
+
+                    if (!playerMoved && (currentTime - lastF2PressTime < 2000)) {
+                        f2PressCount++;
+                    } else {
+                        f2PressCount = 1;
+                    }
+
+                    lastF2PressTime = currentTime;
+                    lastPlayerPosition.copy(controls.getObject().position);
+
+                    // If F2 is pressed 3 times quickly without moving, reload scene
+                    if (f2PressCount >= 3) {
+                        // Reload scene-specific elements
+                        setupInitialStairs();  // Recreate initial stairs
+                        
+                        // Reset player position
+                        camera.position.set(0, 5, 0);
+                        velocity.set(0, 0, 0);
+                        
+                        // Reset game state variables
+                        playerHeight = 0;
+                        lastStairIndex = 0;
+                        stamina = maxStamina;
+                        
+                        // Clear and repopulate stairs
+                        stairs.forEach(stair => {
+                            if (stair) scene.remove(stair);
+                        });
+                        stairs = [];
+                        visibleStairs = [];
+                        
+                        setupInitialStairs();
+                        
+                        // Reset F2 press tracking
+                        f2PressCount = 0;
                     }
                 }
             });
@@ -596,139 +676,178 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        function animate() {
+        function updateDebugInfo() {
+            if (!debugMode) return;
+
+            const currentTime = performance.now();
+            fpsFrames++;
+
+            // Update FPS every second
+            if (currentTime - fpsLastTime >= 1000) {
+                const fps = Math.round((fpsFrames * 1000) / (currentTime - fpsLastTime));
+                
+                // Expanded debug information
+                const debugInfo = `
+                    FPS: ${fps}<br>
+                    Height: ${Math.floor(playerHeight)} m<br>
+                    Position X: ${controls.getObject().position.x.toFixed(2)}<br>
+                    Position Y: ${controls.getObject().position.y.toFixed(2)}<br>
+                    Position Z: ${controls.getObject().position.z.toFixed(2)}<br>
+                    Stamina: ${stamina.toFixed(2)}<br>
+                    Velocity Y: ${velocity.y.toFixed(2)}<br>
+                    Last Stair Index: ${lastStairIndex}
+                `;
+                
+                document.getElementById('debug-info').innerHTML = debugInfo;
+                fpsFrames = 0;
+                fpsLastTime = currentTime;
+            }
+        }
+
+        function animate(currentTime) {
             requestAnimationFrame(animate);
             
-            if (gameOver || gameWon) return;
+            // FPS Limiter
+            const elapsed = currentTime - then;
+            if (elapsed > fpsInterval) {
+                then = currentTime - (elapsed % fpsInterval);
 
-            const time = performance.now();
-            const delta = (time - prevTime) / 1000;
+                updateDebugInfo();  
 
-            velocity.y -= gravity * delta;
+                if (gameOver || gameWon) return;
 
-            direction.z = Number(moveForward) - Number(moveBackward);
-            direction.x = Number(moveRight) - Number(moveLeft);
-            direction.normalize();
+                const time = performance.now();
+                const delta = (time - prevTime) / 1000;
 
-            if (stamina < maxStamina && !moveForward && !moveBackward && !moveLeft && !moveRight) {
-                stamina = Math.min(maxStamina, stamina + staminaRegenRate * delta);
-            }
+                velocity.y -= gravity * delta;
 
-            if (moveForward || moveBackward || moveLeft || moveRight) {
-                const currentDrain = isSprinting ? sprintStaminaDrain : walkStaminaDrain;
-                stamina = Math.max(0, stamina - currentDrain * delta);
-            }
+                direction.z = Number(moveForward) - Number(moveBackward);
+                direction.x = Number(moveRight) - Number(moveLeft);
+                direction.normalize();
 
-            if (isSprinting && stamina > 0) {
-                let speedMultiplier = 1.9; 
-                if (stamina <= 20) {
-                    speedMultiplier = 0.2; 
-                } else if (stamina <= 0) {
-                    speedMultiplier = 0.33; 
+                if (stamina < maxStamina && !moveForward && !moveBackward && !moveLeft && !moveRight) {
+                    stamina = Math.min(maxStamina, stamina + staminaRegenRate * delta);
                 }
 
-                const currentSpeed = movementSpeed * speedMultiplier;
-
-                if (moveForward || moveBackward) {
-                    const forwardMovement = direction.z * currentSpeed * delta;
-                    controls.moveForward(forwardMovement);
-                }
-                if (moveLeft || moveRight) {
-                    const sideMovement = direction.x * currentSpeed * delta;
-                    controls.moveRight(sideMovement);
-                }
-            } else {
-                let speedMultiplier = 1;
-                if (stamina <= 20) {
-                    speedMultiplier = 0.2; 
-                } else if (stamina <= 0) {
-                    speedMultiplier = 0.33; 
+                if (moveForward || moveBackward || moveLeft || moveRight) {
+                    const currentDrain = isSprinting ? sprintStaminaDrain : walkStaminaDrain;
+                    stamina = Math.max(0, stamina - currentDrain * delta);
                 }
 
-                const currentSpeed = movementSpeed * speedMultiplier;
+                if (isSprinting && stamina > 0) {
+                    let speedMultiplier = 1.9; 
+                    if (stamina <= 20) {
+                        speedMultiplier = 0.2; 
+                    } else if (stamina <= 0) {
+                        speedMultiplier = 0.33; 
+                    }
 
-                if (moveForward || moveBackward) {
-                    const forwardMovement = direction.z * currentSpeed * delta;
-                    controls.moveForward(forwardMovement);
+                    const currentSpeed = movementSpeed * speedMultiplier;
+
+                    if (moveForward || moveBackward) {
+                        const forwardMovement = direction.z * currentSpeed * delta;
+                        controls.moveForward(forwardMovement);
+                    }
+                    if (moveLeft || moveRight) {
+                        const sideMovement = direction.x * currentSpeed * delta;
+                        controls.moveRight(sideMovement);
+                    }
+                } else {
+                    let speedMultiplier = 1;
+                    if (stamina <= 20) {
+                        speedMultiplier = 0.2; 
+                    } else if (stamina <= 0) {
+                        speedMultiplier = 0.33; 
+                    }
+
+                    const currentSpeed = movementSpeed * speedMultiplier;
+
+                    if (moveForward || moveBackward) {
+                        const forwardMovement = direction.z * currentSpeed * delta;
+                        controls.moveForward(forwardMovement);
+                    }
+                    if (moveLeft || moveRight) {
+                        const sideMovement = direction.x * currentSpeed * delta;
+                        controls.moveRight(sideMovement);
+                    }
                 }
-                if (moveLeft || moveRight) {
-                    const sideMovement = direction.x * currentSpeed * delta;
-                    controls.moveRight(sideMovement);
+
+                controls.getObject().position.y += velocity.y * delta;
+
+                raycaster.ray.origin.copy(controls.getObject().position);
+                const intersections = raycaster.intersectObjects(stairs.filter(s => s !== null), false);
+                const onObject = intersections.length > 0;
+
+                if (onObject) {
+                    const closestIntersection = intersections[0];
+                    const distanceToGround = closestIntersection.distance;
+
+                    if (distanceToGround <= 2 && velocity.y < 0) {
+                        if (Math.abs(velocity.y) > 5) {
+                            velocity.y *= -0.2; 
+                        } else {
+                            velocity.y = 0;
+                        }
+                        
+                        controls.getObject().position.y = closestIntersection.point.y + 2;
+                        canJump = true;
+                    }
+                } else {
+                    canJump = false;
                 }
-            }
 
-            controls.getObject().position.y += velocity.y * delta;
+                updateVisibleStairs();
 
-            raycaster.ray.origin.copy(controls.getObject().position);
-            const intersections = raycaster.intersectObjects(stairs.filter(s => s !== null), false);
-            const onObject = intersections.length > 0;
+                playerHeight = controls.getObject().position.y;
+                document.getElementById('height').textContent = Math.floor(playerHeight);
 
-            if (onObject) {
-                const closestIntersection = intersections[0];
-                const distanceToGround = closestIntersection.distance;
+                if (playerHeight < failHeight && !gameOver) {
+                    gameOver = true;
+                    document.getElementById('game-over').style.display = 'flex';
+                    controls.unlock();
+                }
 
-                if (distanceToGround <= 2 && velocity.y < 0) {
-                    if (Math.abs(velocity.y) > 5) {
-                        velocity.y *= -0.2; 
-                    } else {
-                        velocity.y = 0;
+                if (playerHeight >= winHeight && !gameWon) {
+                    gameWon = true;
+                    document.getElementById('win-screen').style.display = 'flex';
+                    controls.unlock();
+                    
+                    function shootConfetti() {
+                        confetti({
+                            particleCount: 100,
+                            spread: 70,
+                            origin: { y: 0.6 },
+                            colors: ['#ff0a54', '#ff477e', '#ff7096', '#ff85a2', '#fbb1bd', '#f9bec7']
+                        });
                     }
                     
-                    controls.getObject().position.y = closestIntersection.point.y + 2;
-                    canJump = true;
+                    for (let i = 0; i < 5; i++) {
+                        setTimeout(shootConfetti, i * 500);
+                    }
                 }
-            } else {
-                canJump = false;
-            }
 
-            updateVisibleStairs();
-
-            playerHeight = controls.getObject().position.y;
-            document.getElementById('height').textContent = Math.floor(playerHeight);
-
-            if (playerHeight < failHeight && !gameOver) {
-                gameOver = true;
-                document.getElementById('game-over').style.display = 'flex';
-                controls.unlock();
-            }
-
-            if (playerHeight >= winHeight && !gameWon) {
-                gameWon = true;
-                document.getElementById('win-screen').style.display = 'flex';
-                controls.unlock();
+                const staminaBarElement = document.getElementById('stamina-bar');
+                staminaBarElement.style.width = `${(stamina / maxStamina) * 100}%`;
                 
-                function shootConfetti() {
-                    confetti({
-                        particleCount: 100,
-                        spread: 70,
-                        origin: { y: 0.6 },
-                        colors: ['#ff0a54', '#ff477e', '#ff7096', '#ff85a2', '#fbb1bd', '#f9bec7']
-                    });
+                if (stamina > 50) {
+                    staminaBarElement.style.backgroundColor = '#4CAF50'; // Green
+                } else if (stamina > 20) {
+                    staminaBarElement.style.backgroundColor = '#FFC107'; // Yellow
+                } else {
+                    staminaBarElement.style.backgroundColor = '#F44336'; // Red
                 }
-                
-                for (let i = 0; i < 5; i++) {
-                    setTimeout(shootConfetti, i * 500);
-                }
-            }
 
-            const staminaBarElement = document.getElementById('stamina-bar');
-            staminaBarElement.style.width = `${(stamina / maxStamina) * 100}%`;
-            
-            if (stamina > 50) {
-                staminaBarElement.style.backgroundColor = '#4CAF50'; // Green
-            } else if (stamina > 20) {
-                staminaBarElement.style.backgroundColor = '#FFC107'; // Yellow
-            } else {
-                staminaBarElement.style.backgroundColor = '#F44336'; // Red
+                prevTime = time;
+                renderer.render(scene, camera);
             }
-
-            prevTime = time;
-            renderer.render(scene, camera);
         }
 
         function restartGame() {
             window.location.reload();
         }
+        
+        init();
+        animate(performance.now());
     </script>
 </body>
 </html>
