@@ -101,6 +101,25 @@
         #restart-button-win:hover {
             background-color: #ffdf33;
         }
+
+        #stamina-container {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 300px;
+            height: 20px;
+            background-color: rgba(0, 0, 0, 0.5);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        #stamina-bar {
+            width: 100%;
+            height: 100%;
+            background-color: #4CAF50;
+            transition: width 0.3s ease;
+        }
     </style>
 </head>
 <body>
@@ -123,6 +142,10 @@
         <p>Controls: W/A/S/D to move, Mouse to look around, Space to jump</p>
         <p>Be careful not to fall!</p>
         <button id="start-button">Start Game</button>
+    </div>
+
+    <div id="stamina-container">
+        <div id="stamina-bar"></div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.0/dist/confetti.browser.min.js"></script>
@@ -170,6 +193,14 @@
         // Stair rendering constants
         const stairRenderDistance = 300; 
         const stairRemoveDistance = 100; 
+
+        let stamina = 200;  
+        let isSprinting = false;
+        const maxStamina = 200;  
+        const walkStaminaDrain = 30;  
+        const sprintStaminaDrain = 60;  
+        const jumpStaminaCost = 60;     
+        const staminaRegenRate = 40;    
 
         init();
         animate();
@@ -287,9 +318,20 @@
                         break;
                     case 'Space':
                         if (canJump) {
-                            velocity.y = jumpStrength;
+                            if (stamina <= 20) {
+                                // Very low jump when stamina is red
+                                stamina = Math.max(0, stamina - jumpStaminaCost);
+                                velocity.y = 0.4; // Extremely low jump
+                            } else {
+                                stamina = Math.max(0, stamina - jumpStaminaCost);
+                                velocity.y = jumpStrength;
+                            }
                         }
                         canJump = false;
+                        break;
+                    case 'ShiftLeft':
+                    case 'ShiftRight':
+                        isSprinting = true;
                         break;
                 }
             };
@@ -311,6 +353,10 @@
                     case 'ArrowRight':
                     case 'KeyD':
                         moveRight = false;
+                        break;
+                    case 'ShiftLeft':
+                    case 'ShiftRight':
+                        isSprinting = false;
                         break;
                 }
             };
@@ -558,15 +604,51 @@
             direction.x = Number(moveRight) - Number(moveLeft);
             direction.normalize();
 
-            const currentSpeed = canJump ? movementSpeed : movementSpeed * airControl;
-
-            if (moveForward || moveBackward) {
-                const forwardMovement = direction.z * currentSpeed * delta;
-                controls.moveForward(forwardMovement);
+            if (stamina < maxStamina && !moveForward && !moveBackward && !moveLeft && !moveRight) {
+                stamina = Math.min(maxStamina, stamina + staminaRegenRate * delta);
             }
-            if (moveLeft || moveRight) {
-                const sideMovement = direction.x * currentSpeed * delta;
-                controls.moveRight(sideMovement);
+
+            if (moveForward || moveBackward || moveLeft || moveRight) {
+                const currentDrain = isSprinting ? sprintStaminaDrain : walkStaminaDrain;
+                stamina = Math.max(0, stamina - currentDrain * delta);
+            }
+
+            if (isSprinting && stamina > 0) {
+                let speedMultiplier = 1.9; 
+                if (stamina <= 20) {
+                    speedMultiplier = 0.2; 
+                } else if (stamina <= 0) {
+                    speedMultiplier = 0.33; 
+                }
+
+                const currentSpeed = movementSpeed * speedMultiplier;
+
+                if (moveForward || moveBackward) {
+                    const forwardMovement = direction.z * currentSpeed * delta;
+                    controls.moveForward(forwardMovement);
+                }
+                if (moveLeft || moveRight) {
+                    const sideMovement = direction.x * currentSpeed * delta;
+                    controls.moveRight(sideMovement);
+                }
+            } else {
+                let speedMultiplier = 1;
+                if (stamina <= 20) {
+                    speedMultiplier = 0.2; 
+                } else if (stamina <= 0) {
+                    speedMultiplier = 0.33; 
+                }
+
+                const currentSpeed = movementSpeed * speedMultiplier;
+
+                if (moveForward || moveBackward) {
+                    const forwardMovement = direction.z * currentSpeed * delta;
+                    controls.moveForward(forwardMovement);
+                }
+                if (moveLeft || moveRight) {
+                    const sideMovement = direction.x * currentSpeed * delta;
+                    controls.moveRight(sideMovement);
+                }
             }
 
             controls.getObject().position.y += velocity.y * delta;
@@ -621,6 +703,17 @@
                 for (let i = 0; i < 5; i++) {
                     setTimeout(shootConfetti, i * 500);
                 }
+            }
+
+            const staminaBarElement = document.getElementById('stamina-bar');
+            staminaBarElement.style.width = `${(stamina / maxStamina) * 100}%`;
+            
+            if (stamina > 50) {
+                staminaBarElement.style.backgroundColor = '#4CAF50'; // Green
+            } else if (stamina > 20) {
+                staminaBarElement.style.backgroundColor = '#FFC107'; // Yellow
+            } else {
+                staminaBarElement.style.backgroundColor = '#F44336'; // Red
             }
 
             prevTime = time;
